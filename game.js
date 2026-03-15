@@ -18,11 +18,11 @@ const APP_META = {
 };
 
 const COMPANY_CATALOG = [
-  { name: "Restaurant", price: 50000, monthly: 3500, risk: 0.06 },
-  { name: "Marque vêtements", price: 20000, monthly: 1600, risk: 0.05 },
-  { name: "Startup crypto", price: 100000, monthly: 7800, risk: 0.13 },
-  { name: "Label musique", price: 200000, monthly: 14000, risk: 0.08 },
-  { name: "Équipe de foot", price: 1000000, monthly: 50000, risk: 0.04 },
+  { name: "Restaurant", price: 50000, monthly: 3500, risk: 0.06, employees: 8, popularity: 48, description: "Restauration, influence locale et potentiel viral.", specialty: "Influenceurs et rénovation" },
+  { name: "Marque vêtements", price: 20000, monthly: 1600, risk: 0.05, employees: 4, popularity: 52, description: "Collections, collabs et merchandising artiste.", specialty: "Collections et promos" },
+  { name: "Startup crypto", price: 100000, monthly: 7800, risk: 0.13, employees: 10, popularity: 42, description: "Très rentable mais très instable.", specialty: "Patches et marketing" },
+  { name: "Label musique", price: 200000, monthly: 14000, risk: 0.08, employees: 14, popularity: 55, description: "Synergie maximale avec ta carrière musicale.", specialty: "Signatures et production" },
+  { name: "Équipe de foot", price: 1000000, monthly: 50000, risk: 0.04, employees: 30, popularity: 60, description: "Prestige, merchandising et gros revenus.", specialty: "Coach et joueurs" },
 ];
 
 const CRYPTO_LIST = [
@@ -127,6 +127,7 @@ function freshState() {
 let state = loadState();
 let activeMusicTab = "Apple Music";
 let activeSocialTab = "Instagram";
+let activeCompanyTab = "buy";
 let currentTrackAnimation = null;
 
 const el = {
@@ -143,6 +144,7 @@ init();
 
 function init() {
   bindGlobalActions();
+  normalizeCompaniesState();
   ensureUnlocks();
   refreshUI();
   showHome();
@@ -203,6 +205,7 @@ function deepMerge(target, source) {
 }
 
 function refreshUI() {
+  normalizeCompaniesState();
   ensureUnlocks();
   saveState();
   renderTopbar();
@@ -1170,27 +1173,289 @@ function spawnSocialReaction(song, viral = false) {
   });
 }
 
-function renderCompanies() {
-  const owned = state.companies;
+function getCompanyTemplate(name) {
+  return COMPANY_CATALOG.find((company) => company.name === name);
+}
+
+function normalizeCompaniesState() {
+  state.companies = state.companies.map((company) => {
+    const template = getCompanyTemplate(company.name || company.type);
+    if (!template) return company;
+    return {
+      id: company.id || `company_${template.name}_${Math.floor(Math.random() * 999999)}`,
+      name: template.name,
+      buyPrice: company.buyPrice || template.price,
+      baseMonthly: company.baseMonthly || company.monthly || template.monthly,
+      monthly: company.monthly || template.monthly,
+      risk: company.risk ?? template.risk,
+      level: company.level || 1,
+      popularity: company.popularity ?? template.popularity,
+      employees: company.employees || template.employees,
+      health: company.health ?? 78,
+      value: company.value || template.price,
+      status: company.status || "stable",
+      monthsNegative: company.monthsNegative || 0,
+      lastProfit: company.lastProfit || 0,
+      lastEvent: company.lastEvent || "Aucun événement marquant.",
+      bankrupt: company.bankrupt || false,
+      boughtAt: company.boughtAt || dateString(),
+      description: template.description,
+      specialty: template.specialty,
+    };
+  });
+}
+
+function getCompanySynergy(company) {
+  const recentReleaseBoost = state.lastReleaseMonthIndex !== null && currentMonthIndex() - state.lastReleaseMonthIndex <= 1 ? 8 : 0;
+  if (company.name === "Restaurant") return Math.min(18, Math.floor(state.fans / 8000)) + (state.installedApps["Instagram"] ? 6 : 0) + recentReleaseBoost;
+  if (company.name === "Marque vêtements") return Math.min(24, Math.floor(state.fans / 5000)) + Math.min(10, state.totalSongs * 2);
+  if (company.name === "Startup crypto") return (state.installedApps.Crypto ? 8 : 0) + Math.min(16, Math.floor(state.streamsTotal / 300000));
+  if (company.name === "Label musique") return Math.min(32, state.totalSongs * 3 + Math.floor(state.streamsTotal / 400000));
+  if (company.name === "Équipe de foot") return Math.min(22, Math.floor(state.fans / 10000)) + (state.latestTop100Rank ? 8 : 0);
+  return 0;
+}
+
+function rollCompanyEvent(company) {
+  const positiveEvents = {
+    "Restaurant": [
+      { label: "Un influenceur mange chez toi : buzz local.", cashMultiplier: 1.22, popularityDelta: 8, healthDelta: 0 },
+      { label: "Ton nouveau menu plaît au quartier.", cashMultiplier: 1.15, popularityDelta: 5, healthDelta: 0 },
+    ],
+    "Marque vêtements": [
+      { label: "Une collab mode cartonne.", cashMultiplier: 1.24, popularityDelta: 9, healthDelta: 0 },
+      { label: "Drop sold out en 24h.", cashMultiplier: 1.18, popularityDelta: 6, healthDelta: 0 },
+    ],
+    "Startup crypto": [
+      { label: "Partenariat blockchain signé.", cashMultiplier: 1.3, popularityDelta: 7, healthDelta: 0 },
+      { label: "Ton token est en tendance.", cashMultiplier: 1.2, popularityDelta: 6, healthDelta: 0 },
+    ],
+    "Label musique": [
+      { label: "Un artiste signé explose les streams.", cashMultiplier: 1.28, popularityDelta: 8, healthDelta: 0 },
+      { label: "Placement playlist réussi.", cashMultiplier: 1.18, popularityDelta: 5, healthDelta: 0 },
+    ],
+    "Équipe de foot": [
+      { label: "Belle série de victoires.", cashMultiplier: 1.2, popularityDelta: 7, healthDelta: 0 },
+      { label: "Les maillots se vendent très bien.", cashMultiplier: 1.16, popularityDelta: 5, healthDelta: 0 },
+    ],
+  };
+
+  const negativeEvents = {
+    "Restaurant": [
+      { label: "Avis clients en baisse.", cashMultiplier: 0.78, popularityDelta: -8, healthDelta: -6 },
+      { label: "Problème d'hygiène mineur.", cashMultiplier: 0.68, popularityDelta: -12, healthDelta: -14 },
+    ],
+    "Marque vêtements": [
+      { label: "Collection mal reçue.", cashMultiplier: 0.8, popularityDelta: -9, healthDelta: -5 },
+      { label: "Retour produit massif.", cashMultiplier: 0.7, popularityDelta: -11, healthDelta: -10 },
+    ],
+    "Startup crypto": [
+      { label: "Bug critique sur la plateforme.", cashMultiplier: 0.58, popularityDelta: -12, healthDelta: -18 },
+      { label: "FUD sur les réseaux.", cashMultiplier: 0.75, popularityDelta: -10, healthDelta: -9 },
+    ],
+    "Label musique": [
+      { label: "Un artiste quitte le label.", cashMultiplier: 0.72, popularityDelta: -10, healthDelta: -8 },
+      { label: "Projet repoussé, coûts en hausse.", cashMultiplier: 0.82, popularityDelta: -6, healthDelta: -6 },
+    ],
+    "Équipe de foot": [
+      { label: "Série de défaites.", cashMultiplier: 0.76, popularityDelta: -9, healthDelta: -6 },
+      { label: "Blessure d'une star de l'équipe.", cashMultiplier: 0.7, popularityDelta: -7, healthDelta: -10 },
+    ],
+  };
+
+  const eventChance = Math.min(0.55, 0.24 + company.risk + (company.monthsNegative * 0.05));
+  if (Math.random() > eventChance) {
+    return { label: "Aucun événement marquant.", cashMultiplier: 1, popularityDelta: 0, healthDelta: 0 };
+  }
+
+  const positiveBias = company.popularity >= 50 && company.health >= 50 ? 0.56 : 0.38;
+  const pool = Math.random() < positiveBias ? positiveEvents[company.name] : negativeEvents[company.name];
+  return randomChoice(pool);
+}
+
+function computeMonthlyCompanyResult(company) {
+  if (company.bankrupt) {
+    company.lastProfit = 0;
+    company.lastEvent = "Entreprise en faillite.";
+    company.status = "faillite";
+    return 0;
+  }
+
+  const synergy = getCompanySynergy(company);
+  const event = rollCompanyEvent(company);
+  const baseRevenue = company.baseMonthly * (1 + (company.level - 1) * 0.38);
+  const popularityFactor = 0.55 + company.popularity / 100;
+  const healthFactor = 0.45 + company.health / 100;
+  const synergyFactor = 1 + synergy / 100;
+  const randomFactor = 0.9 + Math.random() * 0.22;
+  const salaryCost = company.employees * (120 + company.level * 28);
+  const gross = Math.floor(baseRevenue * popularityFactor * healthFactor * synergyFactor * randomFactor * event.cashMultiplier);
+  const net = gross - salaryCost;
+
+  company.lastProfit = net;
+  company.lastEvent = event.label;
+  company.popularity = clamp(company.popularity + event.popularityDelta + (net > 0 ? 1 : -2), 0, 100);
+  company.health = clamp(company.health + event.healthDelta + (net > 0 ? 0 : -1), 0, 100);
+  company.value = Math.max(3000, Math.floor(company.value + net * 0.55 + company.level * 900));
+  company.monthly = Math.max(500, Math.floor(baseRevenue));
+  company.monthsNegative = net < 0 ? company.monthsNegative + 1 : 0;
+  company.status = net > 0 ? "croissance" : net < 0 ? "difficile" : "stable";
+
+  if (company.popularity <= 8 || company.health <= 8 || company.monthsNegative >= 4) {
+    company.bankrupt = true;
+    company.status = "faillite";
+    company.lastEvent = "Faillite : l'entreprise doit être revendue ou relancée.";
+    company.value = Math.max(2000, Math.floor(company.buyPrice * 0.15));
+    return Math.min(0, net);
+  }
+
+  return net;
+}
+
+function companyActionCost(company, action) {
+  if (action === "invest") return 4000 + company.level * 2500;
+  if (action === "promo") return 2500 + company.level * 1200;
+  if (action === "hire") return 3000 + company.employees * 120;
+  if (action === "repair") return 3500 + company.level * 1800;
+  if (action === "upgrade") return Math.floor(company.buyPrice * (0.35 + company.level * 0.18));
+  return 0;
+}
+
+function performCompanyAction(companyId, action) {
+  const company = state.companies.find((item) => item.id === companyId);
+  if (!company) return;
+  const cost = companyActionCost(company, action);
+  if (state.money < cost) {
+    toast("Pas assez d'argent pour cette action.", "danger");
+    return;
+  }
+
+  state.money -= cost;
+
+  if (action === "invest") {
+    company.baseMonthly = Math.floor(company.baseMonthly * 1.08);
+    company.value += cost;
+    company.popularity = clamp(company.popularity + 3, 0, 100);
+    company.health = clamp(company.health + 2, 0, 100);
+    company.lastEvent = "Investissement stratégique effectué.";
+  }
+
+  if (action === "promo") {
+    company.popularity = clamp(company.popularity + 12, 0, 100);
+    company.value += Math.floor(cost * 0.5);
+    company.lastEvent = "Campagne marketing lancée.";
+  }
+
+  if (action === "hire") {
+    company.employees += 2;
+    company.baseMonthly = Math.floor(company.baseMonthly * 1.05);
+    company.risk = Math.max(0.02, company.risk - 0.01);
+    company.health = clamp(company.health + 3, 0, 100);
+    company.lastEvent = "Nouveaux recrutements validés.";
+  }
+
+  if (action === "repair") {
+    company.health = clamp(company.health + 18, 0, 100);
+    company.popularity = clamp(company.popularity + 4, 0, 100);
+    if (company.bankrupt && company.health >= 35 && company.popularity >= 20) {
+      company.bankrupt = false;
+      company.monthsNegative = 0;
+      company.status = "relance";
+      company.lastEvent = "Plan de relance réussi, l'entreprise repart.";
+    } else {
+      company.lastEvent = "Réorganisation / rénovation effectuée.";
+    }
+  }
+
+  if (action === "upgrade") {
+    company.level += 1;
+    company.baseMonthly = Math.floor(company.baseMonthly * 1.28);
+    company.value += Math.floor(cost * 1.2);
+    company.popularity = clamp(company.popularity + 6, 0, 100);
+    company.health = clamp(company.health + 6, 0, 100);
+    company.lastEvent = `Entreprise passée niveau ${company.level}.`;
+  }
+
+  addXP(8);
+  state.lastAdvice = `${company.name} : action ${action} effectuée.`;
+  refreshUI();
+  renderCompanies(activeCompanyTab);
+}
+
+function estimateCompanySellPrice(company) {
+  if (company.bankrupt) return Math.max(2000, Math.floor(company.value * 0.45));
+  const multiplier = 0.62 + company.level * 0.08 + company.popularity / 220;
+  return Math.max(3000, Math.floor(company.value * multiplier));
+}
+
+function sellCompany(companyId) {
+  const index = state.companies.findIndex((item) => item.id === companyId);
+  if (index === -1) return;
+  const company = state.companies[index];
+  const sellPrice = estimateCompanySellPrice(company);
+  state.money += sellPrice;
+  state.companies.splice(index, 1);
+  state.lastAdvice = `${company.name} vendue pour ${formatMoney(sellPrice)}.`;
+  refreshUI();
+  renderCompanies("sell");
+}
+
+function renderCompanies(tab = activeCompanyTab) {
+  activeCompanyTab = tab;
+  normalizeCompaniesState();
+  const tabs = [
+    { key: "buy", label: "Acheter" },
+    { key: "sell", label: "Vendre" },
+    { key: "manage", label: "Gestion" },
+  ];
+
   el.screen.innerHTML = `
     <div class="app-page">
-      ${appHeader("🏢 Gestion de société", "Achète des business et encaisse des revenus mensuels.")}
+      ${appHeader("🏢 Gestion de société", "Développe tes sociétés avec niveaux, réputation, événements et risque de faillite.")}
+      <div class="tab-row">
+        ${tabs.map((item) => `<button class="tab-btn ${activeCompanyTab === item.key ? "active-tab" : ""}" data-company-tab="${item.key}">${item.label}</button>`).join("")}
+      </div>
+      ${renderCompanyTabContent()}
+    </div>
+  `;
+
+  wireHomeButton();
+  el.screen.querySelectorAll("[data-company-tab]").forEach((btn) => btn.addEventListener("click", () => renderCompanies(btn.dataset.companyTab)));
+  el.screen.querySelectorAll("[data-buy-company]").forEach((btn) => btn.addEventListener("click", () => buyCompany(btn.dataset.buyCompany)));
+  el.screen.querySelectorAll("[data-sell-company]").forEach((btn) => btn.addEventListener("click", () => sellCompany(btn.dataset.sellCompany)));
+  el.screen.querySelectorAll("[data-company-action]").forEach((btn) => btn.addEventListener("click", () => performCompanyAction(btn.dataset.companyId, btn.dataset.companyAction)));
+}
+
+function renderCompanyTabContent() {
+  if (activeCompanyTab === "buy") {
+    return `
       <div class="list-card">
-        <h3>Marché</h3>
+        <h3>Marché des sociétés</h3>
         <div class="music-grid">
           ${COMPANY_CATALOG.map(renderCompanyMarketRow).join("")}
         </div>
       </div>
+    `;
+  }
+
+  if (activeCompanyTab === "sell") {
+    return `
       <div class="list-card">
-        <h3>Entreprises possédées</h3>
+        <h3>Vendre une société</h3>
         <div class="music-grid">
-          ${owned.length ? owned.map(renderOwnedCompany).join("") : '<div class="empty">Aucune entreprise pour le moment.</div>'}
+          ${state.companies.length ? state.companies.map(renderCompanySellRow).join("") : '<div class="empty">Aucune société à vendre.</div>'}
         </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="list-card">
+      <h3>Gestion avancée</h3>
+      <div class="music-grid">
+        ${state.companies.length ? state.companies.map(renderManagedCompany).join("") : '<div class="empty">Achète une société pour la gérer.</div>'}
       </div>
     </div>
   `;
-  wireHomeButton();
-  el.screen.querySelectorAll("[data-buy-company]").forEach((btn) => btn.addEventListener("click", () => buyCompany(btn.dataset.buyCompany)));
 }
 
 function renderCompanyMarketRow(company) {
@@ -1198,7 +1463,13 @@ function renderCompanyMarketRow(company) {
     <div class="company-row">
       <div class="row-left">
         <div class="row-title">${company.name}</div>
-        <div class="row-meta">Prix ${formatMoney(company.price)} · Revenu ${formatMoney(company.monthly)}/mois</div>
+        <div class="row-meta">${company.description}</div>
+        <div class="tag-row">
+          <span class="tag">Prix ${formatMoney(company.price)}</span>
+          <span class="tag">Revenu base ${formatMoney(company.monthly)}/mois</span>
+          <span class="tag">Risque ${Math.round(company.risk * 100)}%</span>
+          <span class="tag">Spécialité ${company.specialty}</span>
+        </div>
       </div>
       <div class="row-right">
         <button class="btn green" data-buy-company="${company.name}">Acheter</button>
@@ -1207,53 +1478,94 @@ function renderCompanyMarketRow(company) {
   `;
 }
 
-function renderOwnedCompany(company) {
+function renderCompanySellRow(company) {
   return `
-    <div class="company-row">
+    <div class="company-row ${company.bankrupt ? "danger" : ""}">
       <div class="row-left">
-        <div class="row-title">${company.name}</div>
-        <div class="row-meta">Revenu ${formatMoney(company.monthly)} / mois · achetée le ${company.boughtAt}</div>
+        <div class="row-title">${company.name} · niv. ${company.level}</div>
+        <div class="row-meta">Valeur de revente estimée : ${formatMoney(estimateCompanySellPrice(company))}</div>
+        <div class="row-meta">Statut ${company.status} · Réputation ${company.popularity}/100 · Santé ${company.health}/100</div>
       </div>
       <div class="row-right">
-        <div class="row-title">${company.performance}</div>
+        <button class="btn red" data-sell-company="${company.id}">Vendre</button>
       </div>
     </div>
   `;
 }
 
+function renderManagedCompany(company) {
+  const synergy = getCompanySynergy(company);
+  return `
+    <div class="track-card ${company.bankrupt ? "danger" : ""}">
+      <div class="row-title">${company.name} · niveau ${company.level}</div>
+      <div class="row-meta">${company.description}</div>
+      <div class="tag-row" style="margin-top:10px;">
+        <span class="tag">Réputation ${company.popularity}/100</span>
+        <span class="tag">Santé ${company.health}/100</span>
+        <span class="tag">Employés ${company.employees}</span>
+        <span class="tag">Synergie musique +${synergy}%</span>
+        <span class="tag">Profit mois dernier ${formatMoney(company.lastProfit)}</span>
+        <span class="tag">Statut ${company.status}</span>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <div class="small">Dernier événement</div>
+        <div>${company.lastEvent}</div>
+      </div>
+      <div class="form-actions" style="margin-top:12px;">
+        <button class="btn" data-company-id="${company.id}" data-company-action="invest">Investir (${formatMoney(companyActionCost(company, "invest"))})</button>
+        <button class="btn" data-company-id="${company.id}" data-company-action="promo">Pub (${formatMoney(companyActionCost(company, "promo"))})</button>
+        <button class="btn" data-company-id="${company.id}" data-company-action="hire">Recruter (${formatMoney(companyActionCost(company, "hire"))})</button>
+        <button class="btn" data-company-id="${company.id}" data-company-action="repair">Relancer (${formatMoney(companyActionCost(company, "repair"))})</button>
+        <button class="btn green" data-company-id="${company.id}" data-company-action="upgrade">Upgrade (${formatMoney(companyActionCost(company, "upgrade"))})</button>
+      </div>
+      ${company.bankrupt ? '<div class="notice danger" style="margin-top:12px;">Cette société est en faillite. Relance-la ou vends-la.</div>' : ''}
+    </div>
+  `;
+}
+
 function buyCompany(name) {
-  const template = COMPANY_CATALOG.find((c) => c.name === name);
+  const template = getCompanyTemplate(name);
   if (!template) return;
   if (state.money < template.price) {
     toast("Pas assez d'argent.", "danger");
     return;
   }
+
   state.money -= template.price;
   state.companies.push({
+    id: `company_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
     name: template.name,
+    buyPrice: template.price,
+    baseMonthly: template.monthly,
     monthly: template.monthly,
     risk: template.risk,
-    performance: randomChoice(["stable", "croissance", "premium"]),
+    level: 1,
+    popularity: template.popularity,
+    employees: template.employees,
+    health: 80,
+    value: template.price,
+    status: "stable",
+    monthsNegative: 0,
+    lastProfit: 0,
+    lastEvent: "Aucun événement marquant.",
+    bankrupt: false,
     boughtAt: dateString(),
   });
-  addXP(getPassiveXpForMonth());
-  state.lastAdvice = `${template.name} ajoutée à ton portefeuille.`;
+  addXP(18);
+  state.lastAdvice = `${template.name} ajoutée à ton empire.`;
   refreshUI();
-  renderCompanies();
+  renderCompanies("buy");
 }
 
 function payCompanies() {
   if (!state.companies.length) return 0;
+  normalizeCompaniesState();
   let income = 0;
   state.companies.forEach((company) => {
-    let multiplier = 0.85 + Math.random() * 0.5;
-    if (Math.random() < company.risk) multiplier *= 0.5;
-    const gain = Math.floor(company.monthly * multiplier);
-    company.performance = gain > company.monthly ? "croissance" : gain < company.monthly * 0.7 ? "fragile" : "stable";
-    income += gain;
+    income += computeMonthlyCompanyResult(company);
   });
   state.money += income;
-  addXP(8);
+  if (income > 0) addXP(8);
   return income;
 }
 
