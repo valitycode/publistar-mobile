@@ -119,6 +119,8 @@ function freshState() {
     viralMultiplier: 1,
     lastAdvice: "Sors un premier morceau pour lancer ta carrière.",
     openedApp: "home",
+    selectedCrypto: "BitCoinX",
+    lastReleaseMonthIndex: null,
   };
 }
 
@@ -126,10 +128,6 @@ let state = loadState();
 let activeMusicTab = "Apple Music";
 let activeSocialTab = "Instagram";
 let currentTrackAnimation = null;
-
-function syncViewportHeight() {
-  document.documentElement.style.setProperty("--app-height", `${window.innerHeight}px`);
-}
 
 const el = {
   screen: document.getElementById("screen"),
@@ -144,9 +142,6 @@ const el = {
 init();
 
 function init() {
-  syncViewportHeight();
-  window.addEventListener("resize", syncViewportHeight);
-  window.addEventListener("orientationchange", syncViewportHeight);
   bindGlobalActions();
   ensureUnlocks();
   refreshUI();
@@ -572,6 +567,7 @@ function createSong({ title, genre, quality, feat, duration, isAlbumTrack = fals
   state.fans += fansEarned;
   state.taxesDue += Math.floor(moneyEarned * 0.13);
   state.inspiration = clamp(state.inspiration - (isAlbumTrack ? 6 : 12), 0, 100);
+  state.lastReleaseMonthIndex = currentMonthIndex();
   addXP(isAlbumTrack ? 4 : 12);
   spawnSocialReaction(song, viral);
   state.lastAdvice = viral ? "Tu as lancé un buzz viral. Profite du momentum." : managerAdviceText();
@@ -688,7 +684,8 @@ function renderCalendar() {
         </div>
         <div class="panel" style="margin-top:12px;">
           <div class="small">Effets</div>
-          <div class="row-meta">XP gagnée, inspiration régénérée, revenus entreprises, coûts manager et évolution crypto.</div>
+          <div class="row-meta">XP selon ton activité musicale, inspiration régénérée, revenus entreprises, coûts manager et évolution crypto.</div>
+          <div class="row-meta" style="margin-top:6px;">XP mensuelle actuelle : ${getPassiveXpForMonth()} · Inactivité : ${state.lastReleaseMonthIndex === null ? "aucune sortie" : `${Math.max(0, currentMonthIndex() - state.lastReleaseMonthIndex)} mois sans sortie`}</div>
         </div>
       </div>
       <div class="list-card">
@@ -712,13 +709,32 @@ function renderCalendar() {
   });
 }
 
+function currentMonthIndex() {
+  return state.currentMonth + (state.currentYear - 1) * 12;
+}
+
+function getPassiveXpForDay() {
+  if (!state.totalSongs) return 0;
+  if (state.lastReleaseMonthIndex === null) return 0;
+  const idleMonths = Math.max(0, currentMonthIndex() - state.lastReleaseMonthIndex);
+  return idleMonths === 0 ? 2 : idleMonths === 1 ? 1 : 0;
+}
+
+function getPassiveXpForMonth() {
+  if (!state.totalSongs) return 0;
+  if (state.lastReleaseMonthIndex === null) return 0;
+  const idleMonths = Math.max(0, currentMonthIndex() - state.lastReleaseMonthIndex);
+  const xp = Math.floor(18 - idleMonths * 4);
+  return Math.max(0, xp);
+}
+
 function advanceDay() {
   state.currentDay += 1;
   if (state.currentDay > 30) {
     state.currentDay = 1;
     advanceMonth();
   } else {
-    addXP(2);
+    addXP(getPassiveXpForDay());
     evolveCryptos(1);
     decayInspiration();
     randomPassiveStreams();
@@ -738,7 +754,7 @@ function advanceMonth() {
   const managerCost = processManagerMonthlyCost();
   const bankInterest = processBankInterest();
   state.inspiration = clamp(state.inspiration + 10, 0, 100);
-  addXP(18);
+  addXP(getPassiveXpForMonth());
   evolveCryptos(5);
   randomPassiveStreams(true);
   state.viralMultiplier = 1;
@@ -755,7 +771,6 @@ function advanceMonth() {
 
 function advanceYear() {
   for (let i = 0; i < 12; i++) advanceMonth();
-  addXP(40);
   state.inspiration = clamp(state.inspiration + 15, 0, 100);
   state.lastAdvice = "Une année de plus. Pense à diversifier tes revenus.";
   refreshUI();
@@ -929,12 +944,13 @@ function processBankInterest() {
 }
 
 function renderCrypto() {
-  const selected = state.cryptos[0];
+  const selected = state.cryptos.find((coin) => coin.name === state.selectedCrypto) || state.cryptos[0];
+  state.selectedCrypto = selected.name;
   el.screen.innerHTML = `
     <div class="app-page">
       ${appHeader("📈 Crypto", "Achète, vends et suis tes prix en direct simulé.")}
       <div class="chart-card">
-        <h3>Graphique ${selected.name}</h3>
+        <h3>Graphique ${selected.name}</h3><div class="row-meta">Choisis une crypto dans la liste pour changer le graphique.</div>
         <canvas id="cryptoChart" class="chart" width="600" height="180"></canvas>
       </div>
       <div class="form-card">
@@ -958,21 +974,29 @@ function renderCrypto() {
     renderCrypto();
     toast("Marché mis à jour.");
   });
-  el.screen.querySelectorAll("[data-buy-crypto]").forEach((btn) => btn.addEventListener("click", () => tradeCrypto(btn.dataset.buyCrypto, "buy")));
-  el.screen.querySelectorAll("[data-sell-crypto]").forEach((btn) => btn.addEventListener("click", () => tradeCrypto(btn.dataset.sellCrypto, "sell")));
+  el.screen.querySelectorAll("[data-select-crypto]").forEach((btn) => btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.selectedCrypto = btn.dataset.selectCrypto;
+    saveState();
+    renderCrypto();
+  }));
+  el.screen.querySelectorAll("[data-buy-crypto]").forEach((btn) => btn.addEventListener("click", (event) => { event.stopPropagation(); tradeCrypto(btn.dataset.buyCrypto, "buy"); }));
+  el.screen.querySelectorAll("[data-sell-crypto]").forEach((btn) => btn.addEventListener("click", (event) => { event.stopPropagation(); tradeCrypto(btn.dataset.sellCrypto, "sell"); }));
   drawCryptoChart(selected);
 }
 
 function renderCryptoRow(coin) {
   const walletAmount = state.cryptoWallet[coin.name] || 0;
+  const isSelected = state.selectedCrypto === coin.name;
   return `
-    <div class="crypto-row">
+    <div class="crypto-row ${isSelected ? "selected-row" : ""}" data-select-crypto="${coin.name}">
       <div class="row-left">
-        <div class="row-title">${coin.name}</div>
+        <div class="row-title">${coin.name} ${isSelected ? "• graphe affiché" : ""}</div>
         <div class="row-meta">Prix: ${formatMoney(coin.price)} · Portefeuille: ${walletAmount.toFixed(2)}</div>
       </div>
       <div class="row-right">
         <div class="form-actions">
+          <button class="btn" data-select-crypto="${coin.name}">Voir graphe</button>
           <button class="btn green" data-buy-crypto="${coin.name}">Acheter 1</button>
           <button class="btn red" data-sell-crypto="${coin.name}">Vendre 1</button>
         </div>
@@ -1212,7 +1236,7 @@ function buyCompany(name) {
     performance: randomChoice(["stable", "croissance", "premium"]),
     boughtAt: dateString(),
   });
-  addXP(18);
+  addXP(getPassiveXpForMonth());
   state.lastAdvice = `${template.name} ajoutée à ton portefeuille.`;
   refreshUI();
   renderCompanies();
